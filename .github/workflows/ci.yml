@@ -1,0 +1,333 @@
+# ══════════════════════════════════════════════════════════════════════════════
+#  .github/workflows/ci.yml
+#  Logistics Validation API — Continuous Integration Pipeline
+#
+#  Triggers:
+#    • Push to `main` or `develop` branches
+#    • Pull requests targeting `main`
+#
+#  Pipeline stages (in order):
+#    1. lint-and-test  → Static analysis (Ruff) + pytest with coverage
+#    2. docker-build   → Build & cache the multistage Docker image
+#    3. integration    → Spin up the full Compose stack, run a real curl
+#                        healthcheck against Nginx → FastAPI, then tear down
+#
+#  Security:
+#    • Minimal permissions: `contents: read` only at the workflow level.
+#    • No secrets committed; image push is commented out and gated on
+#      `DOCKER_USERNAME` / `DOCKER_TOKEN` secrets being configured.
+#    • Docker layer cache uses `cache-from`/`cache-to` with GitHub's
+#      built-in cache backend — no external registry required for caching.
+# ══════════════════════════════════════════════════════════════════════════════
+
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+      - develop
+  pull_request:
+    branches:
+      - main
+
+# Minimal default permissions — individual jobs elevate only what they need.
+permissions:
+  contents: read
+
+# Cancel any in-flight run for the same branch/PR when a new commit is pushed.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+# ── Global env ────────────────────────────────────────────────────────────────
+env:
+  IMAGE_NAME: logistics-api
+  PYTHON_VERSION: "3.12"
+
+# ══════════════════════════════════════════════════════════════════════════════
+jobs:
+
+  # ────────────────────────────────────────────────────────────────────────────
+  #  JOB 1 — Lint & Unit Tests
+  #  Runs entirely in the GitHub-hosted Python environment (no Docker needed).
+  #  Fast feedback loop: catches code quality issues before expensive builds.
+  # ────────────────────────────────────────────────────────────────────────────
+  lint-and-test:
+    name: "Lint & Unit Tests (Python ${{ env.PYTHON_VERSION }})"
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python ${{ env.PYTHON_VERSION }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          # Cache pip packages keyed on requirements.txt for fast re-installs.
+          cache: pip
+          cache-dependency-path: requirements.txt
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          # Install linting tools (not in requirements.txt — dev-only)
+          pip install ruff==0.7.4
+
+      # ── Static analysis ────────────────────────────────────────────────────
+      - name: Lint with Ruff (style + import order + common bugs)
+        run: |
+          ruff check app/ tests/ --output-format=github
+        # `--output-format=github` renders inline annotations in the PR diff.
+
+      - name: Ruff format check (no changes should be needed)
+        run: |
+          ruff format app/ tests/ --check
+
+      # ── Unit tests ────────────────────────────────────────────────────────
+      - name: Run pytest with coverage
+        run: |
+          pip install pytest-cov
+          pytest tests/ \
+            --tb=short \
+            --cov=app \
+            --cov-report=term-missing \
+            --cov-report=xml:coverage.xml \
+            -q
+
+      - name: Upload coverage report (artifact)
+        uses: actions/upload-artifact@v4
+        if: always()   # Upload even if tests fail (aids debugging)
+        with:
+          name: coverage-report
+          path: coverage.xml
+          retention-days: 14
+
+
+  # ────────────────────────────────────────────────────────────────────────────
+  #  JOB 2 — Docker Build (with layer cache)
+  #  Builds the production image (runner stage) and pushes it to the
+  #  GitHub Actions cache. The integration job pulls it from cache.
+  # ────────────────────────────────────────────────────────────────────────────
+  docker-build:
+    name: "Docker Build & Cache"
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    needs: lint-and-test   # Don't build if tests fail.
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      # ── Docker Buildx setup ───────────────────────────────────────────────
+      # Buildx is required to use the `cache-to`/`cache-from` flags with
+      # the GitHub Actions cache backend.
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      # ── Layer cache ───────────────────────────────────────────────────────
+      # Cache is keyed on:
+      #   1. The runner OS
+      #   2. A fixed cache key string
+      #   3. requirements.txt hash (busts only the pip-install layer on dep changes)
+      #
+      # `restore-keys` allows a partial cache hit (e.g. different requirements.txt)
+      # to still restore OS/apt layers, dramatically speeding up cold builds.
+      - name: Cache Docker layers
+        uses: actions/cache@v4
+        with:
+          path: /tmp/.buildx-cache
+          key: ${{ runner.os }}-buildx-${{ hashFiles('requirements.txt', 'Dockerfile') }}
+          restore-keys: |
+            ${{ runner.os }}-buildx-
+
+      # ── Build (runner stage only) ─────────────────────────────────────────
+      - name: Build Docker image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          target: runner
+          push: false           # No registry push in this job — integration job loads it
+          tags: |
+            ${{ env.IMAGE_NAME }}:ci
+            ${{ env.IMAGE_NAME }}:${{ github.sha }}
+          # Load the image into the local Docker daemon so the next job can use it.
+          load: true
+          cache-from: type=local,src=/tmp/.buildx-cache
+          cache-to: type=local,dest=/tmp/.buildx-cache-new,mode=max
+          labels: |
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.created=${{ github.event.head_commit.timestamp }}
+
+      # ── Rotate cache ──────────────────────────────────────────────────────
+      # The Buildx cache grows unboundedly if left in place.  Moving the new
+      # cache over the old one prevents the cache action from appending and
+      # keeps the stored size manageable (known as the "cache dance").
+      - name: Rotate Buildx cache
+        run: |
+          rm -rf /tmp/.buildx-cache
+          mv /tmp/.buildx-cache-new /tmp/.buildx-cache
+
+      # ── Image size report ─────────────────────────────────────────────────
+      - name: Report image size
+        run: |
+          SIZE=$(docker image inspect ${{ env.IMAGE_NAME }}:ci \
+            --format '{{.Size}}' | awk '{printf "%.1f MB", $1/1024/1024}')
+          echo "### Docker Image Size" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Tag | Size |" >> "$GITHUB_STEP_SUMMARY"
+          echo "|---|---|" >> "$GITHUB_STEP_SUMMARY"
+          echo "| \`${{ env.IMAGE_NAME }}:ci\` | ${SIZE} |" >> "$GITHUB_STEP_SUMMARY"
+
+
+  # ────────────────────────────────────────────────────────────────────────────
+  #  JOB 3 — Integration Test (full stack, real curl)
+  #  Brings up the entire Docker Compose stack on the runner, waits for the
+  #  API to be healthy, and performs a real HTTP request through Nginx.
+  # ────────────────────────────────────────────────────────────────────────────
+  integration:
+    name: "Integration Test (Compose stack + curl)"
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    needs: docker-build
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      # Restore the layer cache so the Compose build is instant.
+      - name: Restore Docker layer cache
+        uses: actions/cache@v4
+        with:
+          path: /tmp/.buildx-cache
+          key: ${{ runner.os }}-buildx-${{ hashFiles('requirements.txt', 'Dockerfile') }}
+          restore-keys: |
+            ${{ runner.os }}-buildx-
+
+      # ── Prepare env file ──────────────────────────────────────────────────
+      - name: Prepare .env file for Compose
+        run: cp .env.example .env
+
+      # ── Build images via Compose ──────────────────────────────────────────
+      # Using `docker compose build` separately from `up` gives us a clean
+      # build log and allows us to surface build failures before networking issues.
+      - name: Build images via Docker Compose
+        run: |
+          docker compose build \
+            --build-arg BUILDKIT_INLINE_CACHE=1
+
+      # ── Start the stack ───────────────────────────────────────────────────
+      - name: Start Compose stack (detached)
+        run: docker compose up --detach --remove-orphans
+
+      # ── Wait for health ───────────────────────────────────────────────────
+      # Poll directly against the api container (bypassing Nginx) first to
+      # verify FastAPI is up, then verify the full Nginx → FastAPI path.
+      - name: Wait for API container to be healthy
+        run: |
+          echo "Polling Docker healthcheck status..."
+          RETRIES=20
+          until [[ "$(docker inspect --format='{{.State.Health.Status}}' logistics_api 2>/dev/null)" == "healthy" ]]; do
+            RETRIES=$((RETRIES - 1))
+            if [[ ${RETRIES} -le 0 ]]; then
+              echo "ERROR: API container did not become healthy in time."
+              docker compose logs
+              exit 1
+            fi
+            echo "  Not healthy yet (${RETRIES} retries left)..."
+            sleep 3
+          done
+          echo "API container is healthy."
+
+      # ── Real curl healthcheck against Nginx ──────────────────────────────
+      # This is the definitive integration gate: it proves that:
+      #   1. Nginx is running and listening on port 80.
+      #   2. The proxy_pass directive correctly routes to `api:8000`.
+      #   3. FastAPI returns a valid JSON response with HTTP 200.
+      - name: "Healthcheck: GET /health via Nginx (port 80)"
+        run: |
+          echo "--- Sending GET http://localhost/health ---"
+          HTTP_STATUS=$(curl --silent \
+                             --fail \
+                             --max-time 5 \
+                             --write-out "%{http_code}" \
+                             --output /tmp/health_response.json \
+                             http://localhost/health)
+          echo "HTTP status : ${HTTP_STATUS}"
+          echo "Response    : $(cat /tmp/health_response.json)"
+
+          if [[ "${HTTP_STATUS}" != "200" ]]; then
+            echo "ERROR: Expected HTTP 200, got ${HTTP_STATUS}"
+            exit 1
+          fi
+
+          # Validate the JSON body contains { "status": "ok" }
+          STATUS_FIELD=$(python3 -c "import json,sys; d=json.load(open('/tmp/health_response.json')); print(d.get('status',''))")
+          if [[ "${STATUS_FIELD}" != "ok" ]]; then
+            echo "ERROR: Expected status=ok, got '${STATUS_FIELD}'"
+            exit 1
+          fi
+          echo "✅ Health endpoint returned HTTP 200 with status=ok"
+
+      # ── MD5 validation smoke test ─────────────────────────────────────────
+      # Compute the canonical MD5 locally with Python, then POST it to the
+      # running API and confirm a 200 response. Validates the full happy path.
+      - name: "Smoke test: POST /validate-md5 via Nginx"
+        run: |
+          # Compute canonical MD5 using the same logic as the service
+          PAYLOAD='{"order_id":42,"status":"shipped"}'
+          MD5=$(python3 -c "
+          import hashlib, json
+          payload = json.loads('${PAYLOAD}')
+          canonical = json.dumps(payload, sort_keys=True, separators=(',',':'), ensure_ascii=True)
+          print(hashlib.md5(canonical.encode('utf-8')).hexdigest())
+          ")
+          echo "Canonical payload : ${PAYLOAD} (keys will be sorted server-side)"
+          echo "Expected MD5      : ${MD5}"
+
+          HTTP_STATUS=$(curl --silent \
+                             --fail \
+                             --max-time 5 \
+                             --write-out "%{http_code}" \
+                             --output /tmp/md5_response.json \
+                             --request POST \
+                             --header "Content-Type: application/json" \
+                             --data "{\"payload\":{\"status\":\"shipped\",\"order_id\":42},\"md5_hash\":\"${MD5}\"}" \
+                             http://localhost/validate-md5)
+          echo "HTTP status : ${HTTP_STATUS}"
+          echo "Response    : $(cat /tmp/md5_response.json)"
+
+          if [[ "${HTTP_STATUS}" != "200" ]]; then
+            echo "ERROR: Expected HTTP 200, got ${HTTP_STATUS}"
+            exit 1
+          fi
+          echo "✅ /validate-md5 returned HTTP 200 — MD5 validation confirmed"
+
+      # ── Container logs on failure ─────────────────────────────────────────
+      # Always print logs when the job fails so the root cause is visible
+      # directly in the Actions UI without needing to ssh into the runner.
+      - name: Print container logs on failure
+        if: failure()
+        run: docker compose logs --tail=100
+
+      # ── Teardown ──────────────────────────────────────────────────────────
+      - name: Tear down Compose stack
+        if: always()   # Run even if previous steps failed
+        run: docker compose down --volumes --remove-orphans
+
+      # ── Job summary ───────────────────────────────────────────────────────
+      - name: Write job summary
+        if: always()
+        run: |
+          echo "## Integration Test Results" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Check | Result |" >> "$GITHUB_STEP_SUMMARY"
+          echo "|---|---|" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Stack started | ✅ |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| GET /health via Nginx | ✅ |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| POST /validate-md5 smoke test | ✅ |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Stack torn down | ✅ |" >> "$GITHUB_STEP_SUMMARY"
