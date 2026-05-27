@@ -1,0 +1,22 @@
+# ── Entorno local ─────────────────────────────────────────────────────────────
+.env
+
+# ── Python ────────────────────────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*.pyo
+.pytest_cache/
+.coverage
+coverage.xml
+*.egg-info/
+dist/
+build/
+
+# ── Docker ────────────────────────────────────────────────────────────────────
+# No ignorar docker-compose.yml ni Dockerfile (son parte del repo)
+
+# ── IDEs ──────────────────────────────────────────────────────────────────────
+.vscode/
+.idea/
+*.swp
+*.swo
