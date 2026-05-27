@@ -54,7 +54,7 @@ jobs:
   #  Fast feedback loop: catches code quality issues before expensive builds.
   # ────────────────────────────────────────────────────────────────────────────
   lint-and-test:
-    name: "Lint & Unit Tests (Python ${{ env.PYTHON_VERSION }})"
+    name: "Lint & Unit Tests (Python 3.12)"
     runs-on: ubuntu-latest
     timeout-minutes: 10
 
