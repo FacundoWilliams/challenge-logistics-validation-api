@@ -21,6 +21,7 @@
 6. [Riesgos, supuestos y hoja de ruta a producción](#6-riesgos-supuestos-y-hoja-de-ruta-a-producción)
 7. [Tech stack](#7-tech-stack)
 8. [Troubleshooting conocido](#8-troubleshooting-conocido)
+9. [Entorno de Ejecución](#9-entorno-de-ejecución)
 
 ---
 
@@ -1019,6 +1020,32 @@ docker exec logistics_nginx ls /etc/nginx/conf.d/
 curl http://localhost/health
 # Salida esperada: {"status":"ok","version":"1.0.0"}
 ```
+
+## 9. Entorno de Ejecución
+
+El entorno utilizado para el desarrollo y validación de esta API es el siguiente:
+
+### System Details Report
+---
+
+#### Report details
+- **Date generated:**                              2026-05-27 17:12:38
+
+#### Hardware Information:
+- **Hardware Model:**                              Lenovo IdeaPad 3 15ADA05
+- **Memory:**                                      8.0 GiB
+- **Processor:**                                   AMD Ryzen™ 5 3500U with Radeon™ Vega Mobile Gfx × 8
+- **Graphics:**                                    AMD Radeon™ Vega 8 Graphics
+- **Disk Capacity:**                               256.1 GB
+
+#### Software Information:
+- **Firmware Version:**                            E8CN34WW
+- **OS Name:**                                     Ubuntu 26.04 LTS
+- **OS Build:**                                    (null)
+- **OS Type:**                                     64-bit
+- **GNOME Version:**                               50
+- **Windowing System:**                            Wayland
+- **Kernel Version:**                              Linux 7.0.0-15-generic
 
 ---
 
