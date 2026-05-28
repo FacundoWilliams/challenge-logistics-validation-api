@@ -55,6 +55,10 @@ jobs:
   #  JOB 1 — Lint & Unit Tests
   #  Runs entirely in the GitHub-hosted Python environment (no Docker needed).
   #  Fast feedback loop: catches code quality issues before expensive builds.
+  #
+  #  NOTE: lint steps use continue-on-error so that pytest always runs and
+  #  coverage.xml is always generated. The job is failed explicitly at the
+  #  end if lint or tests reported any errors.
   # ────────────────────────────────────────────────────────────────────────────
   lint-and-test:
     name: "Lint & Unit Tests (Python 3.12)"
@@ -81,17 +85,25 @@ jobs:
           pip install ruff==0.7.4 pytest-cov
 
       # ── Static analysis ────────────────────────────────────────────────────
+      # continue-on-error: true so that pytest always runs regardless of lint
+      # outcome, guaranteeing coverage.xml is generated for the upload step.
       - name: Lint with Ruff (style + import order + common bugs)
+        id: ruff-check
+        continue-on-error: true
         run: |
           ruff check app/ tests/ --output-format=github
         # `--output-format=github` renders inline annotations in the PR diff.
 
       - name: Ruff format check (no changes should be needed)
+        id: ruff-format
+        continue-on-error: true
         run: |
           ruff format app/ tests/ --check
 
       # ── Unit tests ────────────────────────────────────────────────────────
+      # Runs unconditionally so coverage.xml is always produced.
       - name: Run pytest with coverage
+        id: pytest
         run: |
           pytest tests/ \
             --tb=short \
@@ -108,6 +120,30 @@ jobs:
           path: coverage.xml
           retention-days: 14
           if-no-files-found: warn
+
+      # ── Final gate ────────────────────────────────────────────────────────
+      # Fail the job explicitly if lint or tests reported any errors.
+      # This preserves the correct CI status even though lint used continue-on-error.
+      - name: Fail if lint or tests failed
+        if: always()
+        run: |
+          FAILED=0
+          if [[ "${{ steps.ruff-check.outcome }}" == "failure" ]]; then
+            echo "❌ ruff check reported errors."
+            FAILED=1
+          fi
+          if [[ "${{ steps.ruff-format.outcome }}" == "failure" ]]; then
+            echo "❌ ruff format check reported formatting differences."
+            FAILED=1
+          fi
+          if [[ "${{ steps.pytest.outcome }}" == "failure" ]]; then
+            echo "❌ pytest reported test failures."
+            FAILED=1
+          fi
+          if [[ "${FAILED}" -eq 1 ]]; then
+            exit 1
+          fi
+          echo "✅ All lint and test checks passed."
 
 
   # ────────────────────────────────────────────────────────────────────────────
