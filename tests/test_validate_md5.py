@@ -22,7 +22,9 @@ client = TestClient(app)
 
 def md5_of(payload: dict) -> str:
     """Compute the canonical MD5 for use in test fixtures."""
-    canonical = json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=True)
+    canonical = json.dumps(
+        payload, sort_keys=True, separators=(",", ":"), ensure_ascii=True
+    )
     return hashlib.md5(canonical.encode("utf-8")).hexdigest()
 
 
@@ -127,7 +129,10 @@ class TestValidateMD5Endpoint:
         """
         payload = {"x": 1}
         correct_md5 = md5_of(payload).upper()
-        body = {"payload": payload, "md5_hash": correct_md5.lower()}  # store lower for Pydantic
+        body = {
+            "payload": payload,
+            "md5_hash": correct_md5.lower(),  # store lower for Pydantic
+        }
         response = client.post("/validate-md5", json=body)
         assert response.status_code == 200
 
