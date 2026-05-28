@@ -127,13 +127,22 @@ jobs:
       - name: Fail if lint or tests failed
         if: always()
         run: |
+          # ── Write step summary table ──────────────────────────────────────
+          echo "## Lint & Test Results" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Check | Outcome |" >> "$GITHUB_STEP_SUMMARY"
+          echo "|---|---|" >> "$GITHUB_STEP_SUMMARY"
+          echo "| ruff check (lint) | ${{ steps.ruff-check.outcome == 'success' && '✅ passed' || '❌ FAILED' }} |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| ruff format (style) | ${{ steps.ruff-format.outcome == 'success' && '✅ passed' || '❌ FAILED' }} |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| pytest (unit tests) | ${{ steps.pytest.outcome == 'success' && '✅ passed' || '❌ FAILED' }} |" >> "$GITHUB_STEP_SUMMARY"
+
           FAILED=0
           if [[ "${{ steps.ruff-check.outcome }}" == "failure" ]]; then
-            echo "❌ ruff check reported errors."
+            echo "❌ ruff check reported errors — see annotations above."
             FAILED=1
           fi
           if [[ "${{ steps.ruff-format.outcome }}" == "failure" ]]; then
-            echo "❌ ruff format check reported formatting differences."
+            echo "❌ ruff format --check found formatting differences."
+            echo "   Fix locally with: ruff format app/ tests/"
             FAILED=1
           fi
           if [[ "${{ steps.pytest.outcome }}" == "failure" ]]; then
