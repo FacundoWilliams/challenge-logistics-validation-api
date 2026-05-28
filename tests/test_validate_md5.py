@@ -20,6 +20,7 @@ client = TestClient(app)
 
 # ── Helper ────────────────────────────────────────────────────────────────────
 
+
 def md5_of(payload: dict) -> str:
     """Compute the canonical MD5 for use in test fixtures."""
     canonical = json.dumps(
@@ -55,7 +56,6 @@ class TestCanonicalizeService:
 # ── Endpoint integration tests ────────────────────────────────────────────────
 
 class TestValidateMD5Endpoint:
-
     def test_valid_hash_returns_200(self):
         payload = {"order_id": 42, "status": "shipped"}
         body = {"payload": payload, "md5_hash": md5_of(payload)}

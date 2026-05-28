@@ -98,7 +98,16 @@ jobs:
         id: ruff-format
         continue-on-error: true
         run: |
-          ruff format app/ tests/ --check
+          # Run ruff format (auto-fix), then use git diff to detect any changes.
+          # If ruff changed anything, print the exact diff and fail.
+          ruff format app/ tests/
+          if ! git diff --exit-code; then
+            echo ""
+            echo "❌ ruff format made changes — the above diff shows what needs to be fixed."
+            echo "   Run 'ruff format app/ tests/' locally and commit the result."
+            exit 1
+          fi
+          echo "✅ ruff format: no changes needed."
 
       # ── Unit tests ────────────────────────────────────────────────────────
       # Runs unconditionally so coverage.xml is always produced.
