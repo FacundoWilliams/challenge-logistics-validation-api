@@ -22,6 +22,7 @@
 7. [Tech stack](#7-tech-stack)
 8. [Troubleshooting conocido](#8-troubleshooting-conocido)
 9. [Entorno de Ejecución](#9-entorno-de-ejecución)
+10. [Desarrollo Local y Formateo](#10-desarrollo-local-y-formateo)
 
 ---
 
@@ -1046,6 +1047,31 @@ El entorno utilizado para el desarrollo y validación de esta API es el siguient
 - **GNOME Version:**                               50
 - **Windowing System:**                            Wayland
 - **Kernel Version:**                              Linux 7.0.0-15-generic
+
+## 10. Desarrollo Local y Formateo
+
+Para mantener la calidad y el estilo del código, nuestro pipeline de CI/CD (GitHub Actions) utiliza reglas estrictas de formateo a través de [Ruff](https://docs.astral.sh/ruff/). Si el código enviado en un PR no cumple con estas reglas, el paso `lint-and-test` fallará.
+
+Para evitar fallos en el pipeline y asegurar un formato consistente sin lidiar con los problemas de instalación global de pip en entornos Linux modernos (PEP 668: `externally-managed-environment`), recomendamos ejecutar Ruff a través de un contenedor Docker efímero localmente antes de hacer commit.
+
+### Comando de Formateo Recomendado
+
+Ejecuta el siguiente comando en la raíz del proyecto para aplicar automáticamente las correcciones de formato:
+
+```bash
+docker run --rm -v $(pwd):/app -w /app ghcr.io/astral-sh/ruff:latest format .
+```
+
+**Explicación del comando (DevSecOps Best Practices):**
+- `docker run --rm`: Ejecuta un contenedor efímero que se destruye automáticamente al terminar. No deja basura (dangling containers) en el host.
+- `-v $(pwd):/app`: Monta el directorio de trabajo actual en `/app` dentro del contenedor. Los cambios realizados por Ruff se reflejarán directamente en tus archivos locales.
+- `-w /app`: Establece `/app` como el directorio de trabajo dentro del contenedor, asegurando que Ruff apunte al lugar correcto.
+- `ghcr.io/astral-sh/ruff:latest format .`: Utiliza la imagen oficial de Ruff mantenida por Astral para formatear todo el código en el directorio actual.
+
+**¿Por qué usar este enfoque?**
+1. **Consistencia de CI/CD:** Asegura que utilices las mismas reglas de formateo que aplicará el pipeline.
+2. **Aislamiento del Entorno:** Evita ensuciar el entorno local de Python y evita conflictos de versiones de dependencias (PEP 668).
+3. **Fricción Cero:** Permite formatear el código sin necesidad de configurar y gestionar entornos virtuales (`venv`) solo para el linter.
 
 ---
 
