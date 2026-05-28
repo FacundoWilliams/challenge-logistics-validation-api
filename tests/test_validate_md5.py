@@ -10,7 +10,6 @@ JSON hashing algorithm, making the contract explicit and verifiable.
 import hashlib
 import json
 
-import pytest
 from fastapi.testclient import TestClient
 
 from app.main import app
