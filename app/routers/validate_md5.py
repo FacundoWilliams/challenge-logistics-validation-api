@@ -78,7 +78,7 @@ Returns **422 Unprocessable Entity** if the hash does not match or is malformed.
                             "Expected: 'deadbeef...', "
                             "Computed: 'a1b2c3d4...' "
                             "over canonical JSON: "
-                            "'{\"order_id\":42,\"status\":\"shipped\"}'"
+                            '\'{"order_id":42,"status":"shipped"}\''
                         )
                     }
                 }

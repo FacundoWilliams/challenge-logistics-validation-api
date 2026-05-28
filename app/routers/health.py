@@ -32,9 +32,7 @@ class HealthResponse(BaseModel):
         200: {
             "description": "Service is alive.",
             "content": {
-                "application/json": {
-                    "example": {"status": "ok", "version": "1.0.0"}
-                }
+                "application/json": {"example": {"status": "ok", "version": "1.0.0"}}
             },
         }
     },

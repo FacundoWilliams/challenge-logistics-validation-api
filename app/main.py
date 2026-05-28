@@ -62,7 +62,7 @@ def create_app() -> FastAPI:
     # Locked down by default. Adjust origins for real deployments.
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=["*"],   # Tighten to specific domains in production
+        allow_origins=["*"],  # Tighten to specific domains in production
         allow_methods=["GET", "POST"],
         allow_headers=["Content-Type"],
     )

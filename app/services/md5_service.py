@@ -63,9 +63,9 @@ def canonicalize(payload: dict[str, Any]) -> str:
     """
     return json.dumps(
         payload,
-        sort_keys=True,       # Deterministic key ordering
-        separators=(",", ":"), # No whitespace — compact form
-        ensure_ascii=True,    # ASCII-safe: non-ASCII → \\uXXXX escapes
+        sort_keys=True,  # Deterministic key ordering
+        separators=(",", ":"),  # No whitespace — compact form
+        ensure_ascii=True,  # ASCII-safe: non-ASCII → \\uXXXX escapes
     )
 
 
